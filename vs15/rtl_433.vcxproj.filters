@@ -313,6 +313,9 @@
     <ClCompile Include="..\src\devices\inovalley-kw9015b.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\devices\instapark_n1.c">
+      <Filter>Source Files\devices</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\devices\interlogix.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>

@@ -184,6 +184,7 @@
     <ClCompile Include="..\src\devices\ibis_beacon.c" />
     <ClCompile Include="..\src\devices\infactory.c" />
     <ClCompile Include="..\src\devices\inovalley-kw9015b.c" />
+    <ClCompile Include="..\src\devices\instapark_n1.c" />
     <ClCompile Include="..\src\devices\interlogix.c" />
     <ClCompile Include="..\src\devices\intertechno.c" />
     <ClCompile Include="..\src\devices\kedsum.c" />

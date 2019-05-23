@@ -72,6 +72,7 @@ rtl_433_SOURCES      = abuf.c \
                        devices/ibis_beacon.c \
                        devices/infactory.c \
                        devices/inovalley-kw9015b.c \
+                       devices/instapark_n1.c \
                        devices/interlogix.c \
                        devices/intertechno.c \
                        devices/kedsum.c \
