@@ -13,9 +13,9 @@
 #define DEFAULT_FREQUENCY       433920000
 #define DEFAULT_HOP_TIME        (60*10)
 #define DEFAULT_ASYNC_BUF_NUMBER    0 // Force use of default value (librtlsdr default: 15)
-//#define DEFAULT_BUF_LENGTH      (16 * 32 * 512) // librtlsdr default
+#define DEFAULT_BUF_LENGTH      (16 * 32 * 512) // librtlsdr default
 //#define DEFAULT_ASYNC_BUF_NUMBER 4
-#define DEFAULT_BUF_LENGTH	(16 * 512)
+//#define DEFAULT_BUF_LENGTH	(32 * 512)
 
 /*
  * Theoretical high level at I/Q saturation is 128x128 = 16384 (above is ripple)
