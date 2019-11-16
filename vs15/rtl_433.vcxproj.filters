@@ -47,6 +47,9 @@
     <ClInclude Include="..\include\decoder_util.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\include\fatal.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="..\include\fileformat.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -59,6 +62,9 @@
     <ClInclude Include="..\include\optparse.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\include\output_influx.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="..\include\output_mqtt.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -66,6 +72,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\include\pulse_detect.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\pulse_detect_fsk.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\include\r_api.h">
@@ -142,6 +151,9 @@
     <ClCompile Include="..\src\optparse.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\output_influx.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\output_mqtt.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -149,6 +161,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\src\pulse_detect.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\pulse_detect_fsk.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\src\r_api.c">
@@ -193,6 +208,9 @@
     <ClCompile Include="..\src\devices\ambientweather_wh31e.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\devices\auriol_hg02832.c">
+      <Filter>Source Files\devices</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\devices\blyss.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
@@ -217,6 +235,9 @@
     <ClCompile Include="..\src\devices\chuango.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\devices\companion_wtr001.c">
+      <Filter>Source Files\devices</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\devices\current_cost.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
@@ -226,10 +247,16 @@
     <ClCompile Include="..\src\devices\digitech_xc0324.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\devices\directv.c">
+      <Filter>Source Files\devices</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\devices\dish_remote_6_3.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
     <ClCompile Include="..\src\devices\dsc.c">
+      <Filter>Source Files\devices</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\devices\ecowitt.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
     <ClCompile Include="..\src\devices\efergy_e2_classic.c">
@@ -250,7 +277,13 @@
     <ClCompile Include="..\src\devices\esa.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\devices\esic_emt7110.c">
+      <Filter>Source Files\devices</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\devices\esperanza_ews.c">
+      <Filter>Source Files\devices</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\devices\eurochron.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
     <ClCompile Include="..\src\devices\fineoffset.c">
@@ -286,10 +319,22 @@
     <ClCompile Include="..\src\devices\generic_temperature_sensor.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\devices\gt_tmbbq05.c">
+      <Filter>Source Files\devices</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\devices\gt_wt_02.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\devices\gt_wt_03.c">
+      <Filter>Source Files\devices</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\devices\hcs200.c">
+      <Filter>Source Files\devices</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\devices\hideki.c">
+      <Filter>Source Files\devices</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\devices\holman_ws5029.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
     <ClCompile Include="..\src\devices\hondaremote.c">
@@ -305,6 +350,9 @@
       <Filter>Source Files\devices</Filter>
     </ClCompile>
     <ClCompile Include="..\src\devices\ibis_beacon.c">
+      <Filter>Source Files\devices</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\devices\ikea_sparsnas.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
     <ClCompile Include="..\src\devices\infactory.c">
@@ -367,6 +415,9 @@
     <ClCompile Include="..\src\devices\nexus.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\devices\norgo.c">
+      <Filter>Source Files\devices</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\devices\oil_standard.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
@@ -385,7 +436,10 @@
     <ClCompile Include="..\src\devices\oregon_scientific_v1.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\devices\philips.c">
+    <ClCompile Include="..\src\devices\philips_aj3650.c">
+      <Filter>Source Files\devices</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\devices\philips_aj7010.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
     <ClCompile Include="..\src\devices\prologue.c">
@@ -404,6 +458,9 @@
       <Filter>Source Files\devices</Filter>
     </ClCompile>
     <ClCompile Include="..\src\devices\rubicson.c">
+      <Filter>Source Files\devices</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\devices\rubicson_48659.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
     <ClCompile Include="..\src\devices\s3318p.c">
@@ -430,6 +487,9 @@
     <ClCompile Include="..\src\devices\steelmate.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\devices\tfa_30_3196.c">
+      <Filter>Source Files\devices</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\devices\tfa_pool_thermometer.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
@@ -443,6 +503,9 @@
       <Filter>Source Files\devices</Filter>
     </ClCompile>
     <ClCompile Include="..\src\devices\tpms_citroen.c">
+      <Filter>Source Files\devices</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\devices\tpms_elantra2012.c">
       <Filter>Source Files\devices</Filter>
     </ClCompile>
     <ClCompile Include="..\src\devices\tpms_ford.c">

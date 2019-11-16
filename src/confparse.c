@@ -20,6 +20,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include "confparse.h"
+#include "fatal.h"
 
 #ifdef _WIN32
 #include <io.h>
@@ -53,14 +54,20 @@ char *readconf(char const *path)
     char *conf;
     off_t file_size = fsize(path);
 
+    if (file_size < 0) {
+        fprintf(stderr, "Failed to stat \"%s\"\n", path);
+        return NULL;
+    }
+
     fp = fopen(path, "rb");
     if (fp == NULL) {
         fprintf(stderr, "Failed to open \"%s\"\n", path);
         return NULL;
     }
 
-    conf = (char *)malloc(file_size + 1);
-    if (conf == NULL) {
+    conf = malloc(file_size + 1);
+    if (!conf) {
+        WARN_MALLOC("readconf()");
         fprintf(stderr, "Failed to allocate memory for \"%s\"\n", path);
         fclose(fp);
         return NULL;

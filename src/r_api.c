@@ -21,12 +21,15 @@
 #include "r_private.h"
 #include "r_device.h"
 #include "pulse_demod.h"
+#include "pulse_detect_fsk.h"
 #include "sdr.h"
 #include "data.h"
 #include "list.h"
 #include "optparse.h"
 #include "output_mqtt.h"
+#include "output_influx.h"
 #include "compat_time.h"
+#include "fatal.h"
 
 #ifdef _WIN32
 #include <io.h>
@@ -76,18 +79,16 @@ void r_init_cfg(r_cfg_t *cfg)
     cfg->out_block_size  = DEFAULT_BUF_LENGTH;
     cfg->samp_rate       = DEFAULT_SAMPLE_RATE;
     cfg->conversion_mode = CONVERT_NATIVE;
+    cfg->fsk_pulse_detect_mode = FSK_PULSE_DETECT_AUTO;
 
     list_ensure_size(&cfg->in_files, 100);
     list_ensure_size(&cfg->output_handler, 16);
 
     cfg->demod = calloc(1, sizeof(*cfg->demod));
-    if (!cfg->demod) {
-        fprintf(stderr, "Could not create demod!\n");
-        exit(1);
-    }
+    if (!cfg->demod)
+        FATAL_CALLOC("r_init_cfg()");
 
     cfg->demod->level_limit = DEFAULT_LEVEL_LIMIT;
-    cfg->demod->hop_time    = DEFAULT_HOP_TIME;
 
     list_ensure_size(&cfg->demod->r_devs, 100);
     list_ensure_size(&cfg->demod->dumper, 32);
@@ -96,10 +97,8 @@ void r_init_cfg(r_cfg_t *cfg)
 r_cfg_t *r_create_cfg(void)
 {
     r_cfg_t *cfg = calloc(1, sizeof(*cfg));
-    if (!cfg) {
-        fprintf(stderr, "Could not create cfg!\n");
-        exit(1);
-    }
+    if (!cfg)
+        FATAL_CALLOC("r_create_cfg()");
 
     r_init_cfg(cfg);
 
@@ -108,10 +107,10 @@ r_cfg_t *r_create_cfg(void)
 
 void r_free_cfg(r_cfg_t *cfg)
 {
-    if (cfg->dev)
+    if (cfg->dev) {
         sdr_deactivate(cfg->dev);
-    if (cfg->dev)
         sdr_close(cfg->dev);
+    }
 
     for (void **iter = cfg->demod->dumper.elems; iter && *iter; ++iter) {
         file_info_t const *dumper = *iter;
@@ -142,8 +141,8 @@ void update_protocol(r_cfg_t *cfg, r_device *r_dev)
 {
     float samples_per_us = cfg->samp_rate / 1.0e6;
 
-    r_dev->f_short_width = 1.0 / (r_dev->short_width * samples_per_us);
-    r_dev->f_long_width  = 1.0 / (r_dev->long_width * samples_per_us);
+    r_dev->f_short_width = r_dev->short_width > 0.0 ? 1.0 / (r_dev->short_width * samples_per_us) : 0;
+    r_dev->f_long_width  = r_dev->long_width > 0.0 ? 1.0 / (r_dev->long_width * samples_per_us) : 0;
     r_dev->s_short_width = r_dev->short_width * samples_per_us;
     r_dev->s_long_width  = r_dev->long_width * samples_per_us;
     r_dev->s_reset_limit = r_dev->reset_limit * samples_per_us;
@@ -165,9 +164,11 @@ void register_protocol(r_cfg_t *cfg, r_device *r_dev, char *arg)
     }
     else {
         if (arg && *arg) {
-            fprintf(stderr, "Protocol [%d] \"%s\" does not take arguments \"%s\"!\n", r_dev->protocol_num, r_dev->name, arg);
+            fprintf(stderr, "Protocol [%u] \"%s\" does not take arguments \"%s\"!\n", r_dev->protocol_num, r_dev->name, arg);
         }
         p  = malloc(sizeof(*p));
+        if (!p)
+            FATAL_CALLOC("register_protocol()");
         *p = *r_dev; // copy
     }
 
@@ -179,7 +180,7 @@ void register_protocol(r_cfg_t *cfg, r_device *r_dev, char *arg)
     list_push(&cfg->demod->r_devs, p);
 
     if (cfg->verbosity) {
-        fprintf(stderr, "Registering protocol [%d] \"%s\"\n", r_dev->protocol_num, r_dev->name);
+        fprintf(stderr, "Registering protocol [%u] \"%s\"\n", r_dev->protocol_num, r_dev->name);
     }
 }
 
@@ -213,8 +214,6 @@ void register_all_protocols(r_cfg_t *cfg, unsigned disabled)
 
 void update_protocols(r_cfg_t *cfg)
 {
-    float samples_per_us = cfg->samp_rate / 1.0e6;
-
     for (void **iter = cfg->demod->r_devs.elems; iter && *iter; ++iter) {
         r_device *r_dev = *iter;
         update_protocol(cfg, r_dev);
@@ -225,20 +224,22 @@ void update_protocols(r_cfg_t *cfg)
 
 void calc_rssi_snr(r_cfg_t *cfg, pulse_data_t *pulse_data)
 {
-    float asnr   = (float)pulse_data->ook_high_estimate / ((float)pulse_data->ook_low_estimate + 1);
+    float ook_high_estimate = pulse_data->ook_high_estimate > 0 ? pulse_data->ook_high_estimate : 1;
+    float ook_low_estimate = pulse_data->ook_low_estimate > 0 ? pulse_data->ook_low_estimate : 1;
+    float asnr   = ook_high_estimate / ook_low_estimate;
     float foffs1 = (float)pulse_data->fsk_f1_est / INT16_MAX * cfg->samp_rate / 2.0;
     float foffs2 = (float)pulse_data->fsk_f2_est / INT16_MAX * cfg->samp_rate / 2.0;
     pulse_data->freq1_hz = (foffs1 + cfg->center_frequency);
     pulse_data->freq2_hz = (foffs2 + cfg->center_frequency);
     // NOTE: for (CU8) amplitude is 10x (because it's squares)
     if (cfg->demod->sample_size == 1) { // amplitude (CU8)
-        pulse_data->rssi_db = 10.0f * log10f(pulse_data->ook_high_estimate) - 42.1442f; // 10*log10f(16384.0f)
-        pulse_data->noise_db = 10.0f * log10f(pulse_data->ook_low_estimate + 1) - 42.1442f; // 10*log10f(16384.0f)
+        pulse_data->rssi_db = 10.0f * log10f(ook_high_estimate) - 42.1442f; // 10*log10f(16384.0f)
+        pulse_data->noise_db = 10.0f * log10f(ook_low_estimate) - 42.1442f; // 10*log10f(16384.0f)
         pulse_data->snr_db  = 10.0f * log10f(asnr);
     }
     else { // magnitude (CS16)
-        pulse_data->rssi_db = 20.0f * log10f(pulse_data->ook_high_estimate) - 84.2884f; // 20*log10f(16384.0f)
-        pulse_data->noise_db = 20.0f * log10f(pulse_data->ook_low_estimate + 1) - 84.2884f; // 20*log10f(16384.0f)
+        pulse_data->rssi_db = 20.0f * log10f(ook_high_estimate) - 84.2884f; // 20*log10f(16384.0f)
+        pulse_data->noise_db = 20.0f * log10f(ook_low_estimate) - 84.2884f; // 20*log10f(16384.0f)
         pulse_data->snr_db  = 20.0f * log10f(asnr);
     }
 }
@@ -307,6 +308,43 @@ char const **well_known_output_fields(r_cfg_t *cfg)
     return well_known_default;
 }
 
+/** Convert CSV keys according to selected conversion mode. Replacement is static but in-place. */
+static char const **convert_csv_fields(r_cfg_t *cfg, char const **fields)
+{
+    if (cfg->new_model_keys) {
+        for (char const **p = fields; *p; ++p) {
+            if (!strcmp(*p, "battery")) *p = "battery_ok";
+        }
+    }
+
+    if (cfg->conversion_mode == CONVERT_SI) {
+        for (char const **p = fields; *p; ++p) {
+            if (!strcmp(*p, "temperature_F")) *p = "temperature_C";
+            else if (!strcmp(*p, "pressure_PSI")) *p = "pressure_kPa";
+            else if (!strcmp(*p, "rain_in")) *p = "rain_mm";
+            else if (!strcmp(*p, "rain_rate_in_h")) *p = "rain_rate_mm_h";
+            else if (!strcmp(*p, "wind_avg_mi_h")) *p = "wind_avg_km_h";
+            else if (!strcmp(*p, "wind_max_mi_h")) *p = "wind_max_km_h";
+        }
+    }
+
+    if (cfg->conversion_mode == CONVERT_CUSTOMARY) {
+        for (char const **p = fields; *p; ++p) {
+            if (!strcmp(*p, "temperature_C")) *p = "temperature_F";
+            else if (!strcmp(*p, "temperature_1_C")) *p = "temperature_1_F";
+            else if (!strcmp(*p, "temperature_2_C")) *p = "temperature_2_F";
+            else if (!strcmp(*p, "setpoint_C")) *p = "setpoint_F";
+            else if (!strcmp(*p, "pressure_hPa")) *p = "pressure_inHg";
+            else if (!strcmp(*p, "pressure_kPa")) *p = "pressure_PSI";
+            else if (!strcmp(*p, "rain_mm")) *p = "rain_in";
+            else if (!strcmp(*p, "rain_rate_mm_h")) *p = "rain_rate_in_h";
+            else if (!strcmp(*p, "wind_avg_km_h")) *p = "wind_avg_mi_h";
+            else if (!strcmp(*p, "wind_max_km_h")) *p = "wind_max_mi_h";
+        }
+    }
+    return fields;
+}
+
 // find the fields output for CSV
 char const **determine_csv_fields(r_cfg_t *cfg, char const **well_known, int *num_fields)
 {
@@ -323,10 +361,11 @@ char const **determine_csv_fields(r_cfg_t *cfg, char const **well_known, int *nu
             if (r_dev->fields)
                 list_push_all(&field_list, (void **)r_dev->fields);
             else
-                fprintf(stderr, "rtl_433: warning: %d \"%s\" does not support CSV output\n",
+                fprintf(stderr, "rtl_433: warning: %u \"%s\" does not support CSV output\n",
                         r_dev->protocol_num, r_dev->name);
         }
     }
+    convert_csv_fields(cfg, (char const **)field_list.elems);
 
     if (num_fields)
         *num_fields = field_list.len;
@@ -372,7 +411,7 @@ int run_ook_demods(list_t *r_devs, pulse_data_t *pulse_data)
             p_events += pulse_demod_manchester_zerobit(pulse_data, r_dev);
             break;
         default:
-            fprintf(stderr, "Unknown modulation %d in protocol!\n", r_dev->modulation);
+            fprintf(stderr, "Unknown modulation %u in protocol!\n", r_dev->modulation);
         }
     }
 
@@ -406,7 +445,7 @@ int run_fsk_demods(list_t *r_devs, pulse_data_t *fsk_pulse_data)
             p_events += pulse_demod_manchester_zerobit(fsk_pulse_data, r_dev);
             break;
         default:
-            fprintf(stderr, "Unknown modulation %d in protocol!\n", r_dev->modulation);
+            fprintf(stderr, "Unknown modulation %u in protocol!\n", r_dev->modulation);
         }
     }
 
@@ -416,7 +455,7 @@ int run_fsk_demods(list_t *r_devs, pulse_data_t *fsk_pulse_data)
 /* handlers */
 
 /** Pass the data structure to all output handlers. Frees data afterwards. */
-void event_occured_handler(r_cfg_t *cfg, data_t *data)
+void event_occurred_handler(r_cfg_t *cfg, data_t *data)
 {
     // prepend "time" if requested
     if (cfg->report_time != REPORT_TIME_OFF) {
@@ -444,11 +483,12 @@ void data_acquired_handler(r_device *r_dev, data_t *data)
             if ((d->type == DATA_STRING) && !strcmp(d->key, "battery")) {
                 free(d->key);
                 d->key = strdup("battery_ok");
-                int ok = d->value && !strcmp(d->value, "OK");
-                free(d->value);
+                if (!d->key)
+                    FATAL_STRDUP("data_acquired_handler()");
+                int ok = d->value.v_ptr && !strcmp(d->value.v_ptr, "OK");
+                free(d->value.v_ptr);
                 d->type = DATA_INT;
-                d->value = malloc(sizeof(int));
-                *(int *)d->value = ok;
+                d->value.v_int = ok;
                 break;
             }
         }
@@ -458,7 +498,7 @@ void data_acquired_handler(r_device *r_dev, data_t *data)
         for (data_t *d = data; d; d = d->next) {
             // Convert double type fields ending in _F to _C
             if ((d->type == DATA_DOUBLE) && str_endswith(d->key, "_F")) {
-                *(double*)d->value = fahrenheit2celsius(*(double*)d->value);
+                d->value.v_dbl = fahrenheit2celsius(d->value.v_dbl);
                 char *new_label = str_replace(d->key, "_F", "_C");
                 free(d->key);
                 d->key = new_label;
@@ -469,7 +509,7 @@ void data_acquired_handler(r_device *r_dev, data_t *data)
             }
             // Convert double type fields ending in _mph to _kph
             else if ((d->type == DATA_DOUBLE) && str_endswith(d->key, "_mph")) {
-                *(double*)d->value = mph2kmph(*(double*)d->value);
+                d->value.v_dbl = mph2kmph(d->value.v_dbl);
                 char *new_label = str_replace(d->key, "_mph", "_kph");
                 free(d->key);
                 d->key = new_label;
@@ -479,7 +519,7 @@ void data_acquired_handler(r_device *r_dev, data_t *data)
             }
             // Convert double type fields ending in _mi_h to _km_h
             else if ((d->type == DATA_DOUBLE) && str_endswith(d->key, "_mi_h")) {
-                *(double*)d->value = mph2kmph(*(double*)d->value);
+                d->value.v_dbl = mph2kmph(d->value.v_dbl);
                 char *new_label = str_replace(d->key, "_mi_h", "_km_h");
                 free(d->key);
                 d->key = new_label;
@@ -490,7 +530,7 @@ void data_acquired_handler(r_device *r_dev, data_t *data)
             // Convert double type fields ending in _in to _mm
             else if ((d->type == DATA_DOUBLE) &&
                      (str_endswith(d->key, "_in") || str_endswith(d->key, "_inch"))) {
-                *(double*)d->value = inch2mm(*(double*)d->value);
+                d->value.v_dbl = inch2mm(d->value.v_dbl);
                 char *new_label = str_replace(str_replace(d->key, "_inch", "_in"), "_in", "_mm");
                 free(d->key);
                 d->key = new_label;
@@ -500,7 +540,7 @@ void data_acquired_handler(r_device *r_dev, data_t *data)
             }
             // Convert double type fields ending in _in_h to _mm_h
             else if ((d->type == DATA_DOUBLE) && str_endswith(d->key, "_in_h")) {
-                *(double*)d->value = inch2mm(*(double*)d->value);
+                d->value.v_dbl = inch2mm(d->value.v_dbl);
                 char *new_label = str_replace(d->key, "_in_h", "_mm_h");
                 free(d->key);
                 d->key = new_label;
@@ -510,7 +550,7 @@ void data_acquired_handler(r_device *r_dev, data_t *data)
             }
             // Convert double type fields ending in _inHg to _hPa
             else if ((d->type == DATA_DOUBLE) && str_endswith(d->key, "_inHg")) {
-                *(double*)d->value = inhg2hpa(*(double*)d->value);
+                d->value.v_dbl = inhg2hpa(d->value.v_dbl);
                 char *new_label = str_replace(d->key, "_inHg", "_hPa");
                 free(d->key);
                 d->key = new_label;
@@ -520,7 +560,7 @@ void data_acquired_handler(r_device *r_dev, data_t *data)
             }
             // Convert double type fields ending in _PSI to _kPa
             else if ((d->type == DATA_DOUBLE) && str_endswith(d->key, "_PSI")) {
-                *(double*)d->value = psi2kpa(*(double*)d->value);
+                d->value.v_dbl = psi2kpa(d->value.v_dbl);
                 char *new_label = str_replace(d->key, "_PSI", "_kPa");
                 free(d->key);
                 d->key = new_label;
@@ -534,7 +574,7 @@ void data_acquired_handler(r_device *r_dev, data_t *data)
         for (data_t *d = data; d; d = d->next) {
             // Convert double type fields ending in _C to _F
             if ((d->type == DATA_DOUBLE) && str_endswith(d->key, "_C")) {
-                *(double*)d->value = celsius2fahrenheit(*(double*)d->value);
+                d->value.v_dbl = celsius2fahrenheit(d->value.v_dbl);
                 char *new_label = str_replace(d->key, "_C", "_F");
                 free(d->key);
                 d->key = new_label;
@@ -545,7 +585,7 @@ void data_acquired_handler(r_device *r_dev, data_t *data)
             }
             // Convert double type fields ending in _kph to _mph
             else if ((d->type == DATA_DOUBLE) && str_endswith(d->key, "_kph")) {
-                *(double*)d->value = kmph2mph(*(double*)d->value);
+                d->value.v_dbl = kmph2mph(d->value.v_dbl);
                 char *new_label = str_replace(d->key, "_kph", "_mph");
                 free(d->key);
                 d->key = new_label;
@@ -555,7 +595,7 @@ void data_acquired_handler(r_device *r_dev, data_t *data)
             }
             // Convert double type fields ending in _km_h to _mi_h
             else if ((d->type == DATA_DOUBLE) && str_endswith(d->key, "_km_h")) {
-                *(double*)d->value = kmph2mph(*(double*)d->value);
+                d->value.v_dbl = kmph2mph(d->value.v_dbl);
                 char *new_label = str_replace(d->key, "_km_h", "_mi_h");
                 free(d->key);
                 d->key = new_label;
@@ -565,7 +605,7 @@ void data_acquired_handler(r_device *r_dev, data_t *data)
             }
             // Convert double type fields ending in _mm to _inch
             else if ((d->type == DATA_DOUBLE) && str_endswith(d->key, "_mm")) {
-                *(double*)d->value = mm2inch(*(double*)d->value);
+                d->value.v_dbl = mm2inch(d->value.v_dbl);
                 char *new_label = str_replace(d->key, "_mm", "_in");
                 free(d->key);
                 d->key = new_label;
@@ -575,7 +615,7 @@ void data_acquired_handler(r_device *r_dev, data_t *data)
             }
             // Convert double type fields ending in _mm_h to _in_h
             else if ((d->type == DATA_DOUBLE) && str_endswith(d->key, "_mm_h")) {
-                *(double*)d->value = mm2inch(*(double*)d->value);
+                d->value.v_dbl = mm2inch(d->value.v_dbl);
                 char *new_label = str_replace(d->key, "_mm_h", "_in_h");
                 free(d->key);
                 d->key = new_label;
@@ -585,7 +625,7 @@ void data_acquired_handler(r_device *r_dev, data_t *data)
             }
             // Convert double type fields ending in _hPa to _inHg
             else if ((d->type == DATA_DOUBLE) && str_endswith(d->key, "_hPa")) {
-                *(double*)d->value = hpa2inhg(*(double*)d->value);
+                d->value.v_dbl = hpa2inhg(d->value.v_dbl);
                 char *new_label = str_replace(d->key, "_hPa", "_inHg");
                 free(d->key);
                 d->key = new_label;
@@ -595,7 +635,7 @@ void data_acquired_handler(r_device *r_dev, data_t *data)
             }
             // Convert double type fields ending in _kPa to _PSI
             else if ((d->type == DATA_DOUBLE) && str_endswith(d->key, "_kPa")) {
-                *(double*)d->value = kpa2psi(*(double*)d->value);
+                d->value.v_dbl = kpa2psi(d->value.v_dbl);
                 char *new_label = str_replace(d->key, "_kPa", "_PSI");
                 free(d->key);
                 d->key = new_label;
@@ -803,9 +843,14 @@ void add_mqtt_output(r_cfg_t *cfg, char *param)
     char *host = "localhost";
     char *port = "1883";
     char *opts = hostport_param(param, &host, &port);
-    fprintf(stderr, "Publishing MQTT UDP datagrams to %s port %s\n", host, port);
+    fprintf(stderr, "Publishing MQTT data to %s port %s\n", host, port);
 
     list_push(&cfg->output_handler, data_output_mqtt_create(host, port, opts, cfg->dev_query));
+}
+
+void add_influx_output(r_cfg_t *cfg, char *param)
+{
+    list_push(&cfg->output_handler, data_output_influx_create(param));
 }
 
 void add_syslog_output(r_cfg_t *cfg, char *param)
@@ -820,12 +865,15 @@ void add_syslog_output(r_cfg_t *cfg, char *param)
 
 void add_null_output(r_cfg_t *cfg, char *param)
 {
+    (void)param;
     list_push(&cfg->output_handler, NULL);
 }
 
 void add_dumper(r_cfg_t *cfg, char const *spec, int overwrite)
 {
     file_info_t *dumper = calloc(1, sizeof(*dumper));
+    if (!dumper)
+        FATAL_CALLOC("add_dumper()");
     list_push(&cfg->demod->dumper, dumper);
 
     parse_file_info(spec, dumper);

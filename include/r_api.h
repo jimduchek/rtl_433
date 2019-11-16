@@ -60,7 +60,7 @@ int run_fsk_demods(struct list *r_devs, struct pulse_data *fsk_pulse_data);
 
 /* handlers */
 
-void event_occured_handler(struct r_cfg *cfg, struct data *data);
+void event_occurred_handler(struct r_cfg *cfg, struct data *data);
 
 void data_acquired_handler(struct r_device *r_dev, struct data *data);
 
@@ -77,6 +77,8 @@ void add_csv_output(struct r_cfg *cfg, char *param);
 void add_kv_output(struct r_cfg *cfg, char *param);
 
 void add_mqtt_output(struct r_cfg *cfg, char *param);
+
+void add_influx_output(struct r_cfg *cfg, char *param);
 
 void add_syslog_output(struct r_cfg *cfg, char *param);
 

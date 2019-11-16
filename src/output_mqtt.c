@@ -13,6 +13,7 @@
 #include "output_mqtt.h"
 #include "optparse.h"
 #include "util.h"
+#include "fatal.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -95,16 +96,13 @@ static void mqtt_client_event(struct mg_connection *nc, int ev, void *ev_data)
 static struct mg_mgr *mqtt_client_init(char const *host, char const *port, char const *user, char const *pass, char const *client_id, int retain)
 {
     struct mg_mgr *mgr = calloc(1, sizeof(*mgr));
-    if (!mgr) {
-        fprintf(stderr, "calloc() failed in %s() %s:%d\n", __func__, __FILE__, __LINE__);
-        exit(1);
-    }
+    if (!mgr)
+        FATAL_CALLOC("mqtt_client_init()");
 
     mqtt_client_t *ctx = calloc(1, sizeof(*ctx));
-    if (!ctx) {
-        fprintf(stderr, "calloc() failed in %s() %s:%d\n", __func__, __FILE__, __LINE__);
-        exit(1);
-    }
+    if (!ctx)
+        FATAL_CALLOC("mqtt_client_init()");
+
     ctx->opts.user_name = user;
     ctx->opts.password  = pass;
     ctx->publish_flags  = MG_MQTT_QOS(0) | (retain ? MG_MQTT_RETAIN : 0);
@@ -167,26 +165,19 @@ static char *mqtt_sanitize_topic(char *topic)
 
 /* MQTT printer */
 
-typedef enum {
-    USE_CHANNEL_NO = 0,
-    USE_CHANNEL_REPLACE_ID = 1,
-    USE_CHANNEL_AFTER_ID,
-    USE_CHANNEL_BEFORE_ID,
-} use_channel_t;
-
 typedef struct {
     struct data_output output;
     struct mg_mgr *mgr;
     char topic[256];
+    char hostname[64];
     char *devices;
     char *events;
     char *states;
-    use_channel_t use_channel;
     //char *homie;
     //char *hass;
 } data_output_mqtt_t;
 
-static void print_mqtt_array(data_output_t *output, data_array_t *array, char *format)
+static void print_mqtt_array(data_output_t *output, data_array_t *array, char const *format)
 {
     data_output_mqtt_t *mqtt = (data_output_mqtt_t *)output;
 
@@ -202,14 +193,12 @@ static void print_mqtt_array(data_output_t *output, data_array_t *array, char *f
 static char *append_topic(char *topic, data_t *data)
 {
     if (data->type == DATA_STRING) {
-        *topic++ = '/';
-        strcpy(topic, data->value);
+        strcpy(topic, data->value.v_ptr);
         mqtt_sanitize_topic(topic);
-        topic += strlen(data->value);
+        topic += strlen(data->value.v_ptr);
     }
     else if (data->type == DATA_INT) {
-        *topic++ = '/';
-        topic += sprintf(topic, "%d", *(int *)data->value);
+        topic += sprintf(topic, "%d", data->value.v_int);
     }
     else {
         fprintf(stderr, "Can't append data type %d to topic\n", data->type);
@@ -218,26 +207,18 @@ static char *append_topic(char *topic, data_t *data)
     return topic;
 }
 
-// <prefix>/[<type>/][<model>/][<subtype>/][<channel>|<id>/]battery: "OK"|"LOW"
-static void print_mqtt_data(data_output_t *output, data_t *data, char *format)
+static char *expand_topic(char *topic, char const *format, data_t *data, char const *hostname)
 {
-    data_output_mqtt_t *mqtt = (data_output_mqtt_t *)output;
-
-    char *orig = mqtt->topic + strlen(mqtt->topic); // save current topic
-    char *end  = orig;
-
     // collect well-known top level keys
     data_t *data_type    = NULL;
-    data_t *data_brand   = NULL;
     data_t *data_model   = NULL;
     data_t *data_subtype = NULL;
     data_t *data_channel = NULL;
     data_t *data_id      = NULL;
+    data_t *data_protocol = NULL;
     for (data_t *d = data; d; d = d->next) {
         if (!strcmp(d->key, "type"))
             data_type = d;
-        else if (!strcmp(d->key, "brand"))
-            data_brand = d;
         else if (!strcmp(d->key, "model"))
             data_model = d;
         else if (!strcmp(d->key, "subtype"))
@@ -246,17 +227,115 @@ static void print_mqtt_data(data_output_t *output, data_t *data, char *format)
             data_channel = d;
         else if (!strcmp(d->key, "id"))
             data_id = d;
+        else if (!strcmp(d->key, "protocol")) // NOTE: needs "-M protocol"
+            data_protocol = d;
     }
+
+    // consume entire format string
+    while (format && *format) {
+        data_t *data_token  = NULL;
+        char const *string_token = NULL;
+        int leading_slash   = 0;
+        char const *t_start = NULL;
+        char const *t_end   = NULL;
+        char const *d_start = NULL;
+        char const *d_end   = NULL;
+        // copy until '['
+        while (*format && *format != '[')
+            *topic++ = *format++;
+        // skip '['
+        if (!*format)
+            break;
+        ++format;
+        // read slash
+        if (*format == '/') {
+            leading_slash = 1;
+            format++;
+        }
+        // read key until : or ]
+        t_start = t_end = format;
+        while (*format && *format != ':' && *format != ']' && *format != '[')
+            t_end = ++format;
+        // read default until ]
+        if (*format == ':') {
+            d_start = d_end = ++format;
+            while (*format && *format != ']' && *format != '[')
+                d_end = ++format;
+        }
+        // check for proper closing
+        if (*format != ']') {
+            fprintf(stderr, "%s: unterminated token\n", __func__);
+            exit(1);
+        }
+        ++format;
+
+        // resolve token
+        if (!strncmp(t_start, "hostname", t_end - t_start))
+            string_token = hostname;
+        else if (!strncmp(t_start, "type", t_end - t_start))
+            data_token = data_type;
+        else if (!strncmp(t_start, "model", t_end - t_start))
+            data_token = data_model;
+        else if (!strncmp(t_start, "subtype", t_end - t_start))
+            data_token = data_subtype;
+        else if (!strncmp(t_start, "channel", t_end - t_start))
+            data_token = data_channel;
+        else if (!strncmp(t_start, "id", t_end - t_start))
+            data_token = data_id;
+        else if (!strncmp(t_start, "protocol", t_end - t_start))
+            data_token = data_protocol;
+        else {
+            fprintf(stderr, "%s: unknown token \"%.*s\"\n", __func__, (int)(t_end - t_start), t_start);
+            exit(1);
+        }
+
+        // append token or default
+        if (!data_token && !string_token && !d_start)
+            continue;
+        if (leading_slash)
+            *topic++ = '/';
+        if (data_token)
+            topic = append_topic(topic, data_token);
+        else if (string_token)
+            topic += sprintf(topic, "%s", string_token);
+        else
+            topic += sprintf(topic, "%.*s", (int)(d_end - d_start), d_start);
+    }
+
+    *topic = '\0';
+    return topic;
+}
+
+// <prefix>[/type][/model][/subtype][/channel][/id]/battery: "OK"|"LOW"
+static void print_mqtt_data(data_output_t *output, data_t *data, char const *format)
+{
+    data_output_mqtt_t *mqtt = (data_output_mqtt_t *)output;
+
+    char *orig = mqtt->topic + strlen(mqtt->topic); // save current topic
+    char *end  = orig;
 
     // top-level only
     if (!*mqtt->topic) {
+        // collect well-known top level keys
+        data_t *data_model = NULL;
+        for (data_t *d = data; d; d = d->next) {
+            if (!strcmp(d->key, "model"))
+                data_model = d;
+        }
+
         // "states" topic
         if (!data_model) {
             if (mqtt->states) {
                 size_t message_size = 20000; // state message need a large buffer
                 char *message       = malloc(message_size);
+                if (!message) {
+                    WARN_MALLOC("print_mqtt_data()");
+                    return; // NOTE: skip output on alloc failure.
+                }
                 data_print_jsons(data, message, message_size);
-                mqtt_client_publish(mqtt->mgr, mqtt->states, message);
+                expand_topic(mqtt->topic, mqtt->states, data, mqtt->hostname);
+                mqtt_client_publish(mqtt->mgr, mqtt->topic, message);
+                *mqtt->topic = '\0'; // clear topic
                 free(message);
             }
             return;
@@ -266,7 +345,9 @@ static void print_mqtt_data(data_output_t *output, data_t *data, char *format)
         if (mqtt->events) {
             char message[1024]; // we expect the biggest strings to be around 500 bytes.
             data_print_jsons(data, message, sizeof(message));
-            mqtt_client_publish(mqtt->mgr, mqtt->events, message);
+            expand_topic(mqtt->topic, mqtt->events, data, mqtt->hostname);
+            mqtt_client_publish(mqtt->mgr, mqtt->topic, message);
+            *mqtt->topic = '\0'; // clear topic
         }
 
         // "devices" topic
@@ -274,47 +355,12 @@ static void print_mqtt_data(data_output_t *output, data_t *data, char *format)
             return;
         }
 
-        strcpy(mqtt->topic, mqtt->devices);
-        end = mqtt->topic + strlen(mqtt->topic);
-    }
-
-    // create topic
-    if (data_type)
-        end = append_topic(end, data_type);
-    if (data_brand)
-        end = append_topic(end, data_brand);
-    if (data_model)
-        end = append_topic(end, data_model);
-    if (data_subtype)
-        end = append_topic(end, data_subtype);
-
-    if (mqtt->use_channel == USE_CHANNEL_REPLACE_ID) {
-        if (data_channel)
-            end = append_topic(end, data_channel);
-        else if (data_id)
-            end = append_topic(end, data_id);
-    }
-    else if (mqtt->use_channel == USE_CHANNEL_AFTER_ID) {
-        if (data_id)
-            end = append_topic(end, data_id);
-        if (data_channel)
-            end = append_topic(end, data_channel);
-    }
-    else if (mqtt->use_channel == USE_CHANNEL_BEFORE_ID) {
-        if (data_channel)
-            end = append_topic(end, data_channel);
-        if (data_id)
-            end = append_topic(end, data_id);
-    }
-    else /* USE_CHANNEL_NO */ {
-        if (data_id)
-            end = append_topic(end, data_id);
+        end = expand_topic(mqtt->topic, mqtt->devices, data, mqtt->hostname);
     }
 
     while (data) {
-        if (!strcmp(data->key, "time")
+        if (!strcmp(data->key, "brand")
                 || !strcmp(data->key, "type")
-                || !strcmp(data->key, "brand")
                 || !strcmp(data->key, "model")
                 || !strcmp(data->key, "subtype")) {
             // skip, except "id", "channel"
@@ -331,20 +377,32 @@ static void print_mqtt_data(data_output_t *output, data_t *data, char *format)
     *orig = '\0'; // restore topic
 }
 
-static void print_mqtt_string(data_output_t *output, char const *str, char *format)
+static void print_mqtt_string(data_output_t *output, char const *str, char const *format)
 {
     data_output_mqtt_t *mqtt = (data_output_mqtt_t *)output;
     mqtt_client_publish(mqtt->mgr, mqtt->topic, str);
 }
 
-static void print_mqtt_double(data_output_t *output, double data, char *format)
+static void print_mqtt_double(data_output_t *output, double data, char const *format)
 {
     char str[20];
-    int ret = snprintf(str, 20, "%f", data);
+    // use scientific notation for very big/small values
+    if (data > 1e7 || data < 1e-4) {
+        int ret = snprintf(str, 20, "%g", data);
+    }
+    else {
+        int ret = snprintf(str, 20, "%.5f", data);
+        // remove trailing zeros, always keep one digit after the decimal point
+        char *p = str + ret - 1;
+        while (*p == '0' && p[-1] != '.') {
+            *p-- = '\0';
+        }
+    }
+
     print_mqtt_string(output, str, format);
 }
 
-static void print_mqtt_int(data_output_t *output, int data, char *format)
+static void print_mqtt_int(data_output_t *output, int data, char const *format)
 {
     char str[20];
     int ret = snprintf(str, 20, "%d", data);
@@ -380,50 +438,57 @@ static void data_output_mqtt_free(data_output_t *output)
 
 static char *mqtt_topic_default(char const *topic, char const *base, char const *suffix)
 {
-    if (topic)
-        return strdup(topic);
+    char path[256];
+    char const *p;
+    if (topic) {
+        p = topic;
+    }
+    else if (!base) {
+        p = suffix;
+    }
+    else {
+        snprintf(path, sizeof(path), "%s/%s", base, suffix);
+        p = path;
+    }
 
-    if (!base)
-        return strdup(suffix);
-
-    char path[128];
-    snprintf(path, sizeof(path), "%s/%s", base, suffix);
-    return strdup(path);
+    char *ret = strdup(p);
+    if (!ret)
+        WARN_STRDUP("mqtt_topic_default()");
+    return ret;
 }
 
 struct data_output *data_output_mqtt_create(char const *host, char const *port, char *opts, char const *dev_hint)
 {
     data_output_mqtt_t *mqtt = calloc(1, sizeof(data_output_mqtt_t));
-    if (!mqtt) {
-        fprintf(stderr, "calloc() failed in %s() %s:%d\n", __func__, __FILE__, __LINE__);
-        exit(1);
-    }
+    if (!mqtt)
+        FATAL_CALLOC("data_output_mqtt_create()");
 
-    char hostname[64];
-    gethostname(hostname, sizeof(hostname) - 1);
-    hostname[sizeof(hostname) - 1] = '\0';
+    gethostname(mqtt->hostname, sizeof(mqtt->hostname) - 1);
+    mqtt->hostname[sizeof(mqtt->hostname) - 1] = '\0';
     // only use hostname, not domain part
-    char *dot = strchr(hostname, '.');
+    char *dot = strchr(mqtt->hostname, '.');
     if (dot)
         *dot = '\0';
     //fprintf(stderr, "Hostname: %s\n", hostname);
 
     // generate a short deterministic client_id to identify this input device on restart
-    uint16_t host_crc = crc16((uint8_t *)hostname, strlen(hostname), 0x1021, 0xffff);
+    uint16_t host_crc = crc16((uint8_t *)mqtt->hostname, strlen(mqtt->hostname), 0x1021, 0xffff);
     uint16_t devq_crc = crc16((uint8_t *)dev_hint, dev_hint ? strlen(dev_hint) : 0, 0x1021, 0xffff);
     char client_id[17];
     snprintf(client_id, sizeof(client_id), "rtl_433-%04x%04x", host_crc, devq_crc);
 
     // default base topic
-    char base_topic[8 + sizeof(hostname)];
-    snprintf(base_topic, sizeof(base_topic), "rtl_433/%s", hostname);
+    char base_topic[8 + sizeof(mqtt->hostname)];
+    snprintf(base_topic, sizeof(base_topic), "rtl_433/%s", mqtt->hostname);
+
+    // default topics
+    char const *path_devices = "devices[/type][/model][/subtype][/channel][/id]";
+    char const *path_events = "events";
+    char const *path_states = "states";
 
     char *user = NULL;
     char *pass = NULL;
     int retain = 0;
-
-    // defaults
-    mqtt->use_channel = USE_CHANNEL_REPLACE_ID;
 
     // parse auth and format options
     char *key, *val;
@@ -440,23 +505,22 @@ struct data_output *data_output_mqtt_create(char const *host, char const *port, 
             retain = atobv(val, 1);
         // Simple key-topic mapping
         else if (!strcasecmp(key, "d") || !strcasecmp(key, "devices"))
-            mqtt->devices = mqtt_topic_default(val, base_topic, "devices");
+            mqtt->devices = mqtt_topic_default(val, base_topic, path_devices);
+        // deprecated, remove this
         else if (!strcasecmp(key, "c") || !strcasecmp(key, "usechannel")) {
-            if (!strcasecmp(val, "afterid"))
-                mqtt->use_channel = USE_CHANNEL_AFTER_ID;
-            else if (!strcasecmp(val, "beforeid"))
-                mqtt->use_channel = USE_CHANNEL_BEFORE_ID;
-            else if (!strcasecmp(val, "replaceid"))
-                mqtt->use_channel = USE_CHANNEL_REPLACE_ID;
-            else
-                mqtt->use_channel = atobv(val, USE_CHANNEL_REPLACE_ID);
+            fprintf(stderr, "\"usechannel=...\" has been removed. Use a topic format string:\n");
+            fprintf(stderr, "for \"afterid\"   use e.g. \"devices=rtl_433/[hostname]/devices[/type][/model][/subtype][/id][/channel]\"\n");
+            fprintf(stderr, "for \"beforeid\"  use e.g. \"devices=rtl_433/[hostname]/devices[/type][/model][/subtype][/channel][/id]\"\n");
+            fprintf(stderr, "for \"replaceid\" use e.g. \"devices=rtl_433/[hostname]/devices[/type][/model][/subtype][/channel]\"\n");
+            fprintf(stderr, "for \"no\"        use e.g. \"devices=rtl_433/[hostname]/devices[/type][/model][/subtype][/id]\"\n");
+            exit(1);
         }
         // JSON events to single topic
         else if (!strcasecmp(key, "e") || !strcasecmp(key, "events"))
-            mqtt->events = mqtt_topic_default(val, base_topic, "events");
+            mqtt->events = mqtt_topic_default(val, base_topic, path_events);
         // JSON states to single topic
         else if (!strcasecmp(key, "s") || !strcasecmp(key, "states"))
-            mqtt->states = mqtt_topic_default(val, base_topic, "states");
+            mqtt->states = mqtt_topic_default(val, base_topic, path_states);
         // TODO: Homie Convention https://homieiot.github.io/
         //else if (!strcasecmp(key, "o") || !strcasecmp(key, "homie"))
         //    mqtt->homie = mqtt_topic_default(val, NULL, "homie"); // base topic
@@ -464,17 +528,23 @@ struct data_output *data_output_mqtt_create(char const *host, char const *port, 
         //else if (!strcasecmp(key, "a") || !strcasecmp(key, "hass"))
         //    mqtt->hass = mqtt_topic_default(val, NULL, "homeassistant"); // discovery prefix
         else {
-            printf("Invalid key \"%s\" option.\n", key);
+            fprintf(stderr, "Invalid key \"%s\" option.\n", key);
             exit(1);
         }
     }
 
     // Default is to use all formats
     if (!mqtt->devices && !mqtt->events && !mqtt->states) {
-        mqtt->devices = mqtt_topic_default(NULL, base_topic, "devices");
-        mqtt->events  = mqtt_topic_default(NULL, base_topic, "events");
-        mqtt->states  = mqtt_topic_default(NULL, base_topic, "states");
+        mqtt->devices = mqtt_topic_default(NULL, base_topic, path_devices);
+        mqtt->events  = mqtt_topic_default(NULL, base_topic, path_events);
+        mqtt->states  = mqtt_topic_default(NULL, base_topic, path_states);
     }
+    if (mqtt->devices)
+        fprintf(stderr, "Publishing device info to MQTT topic \"%s\".\n", mqtt->devices);
+    if (mqtt->events)
+        fprintf(stderr, "Publishing events info to MQTT topic \"%s\".\n", mqtt->events);
+    if (mqtt->states)
+        fprintf(stderr, "Publishing states info to MQTT topic \"%s\".\n", mqtt->states);
 
     mqtt->output.print_data   = print_mqtt_data;
     mqtt->output.print_array  = print_mqtt_array;
