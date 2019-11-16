@@ -149,8 +149,8 @@
     DECL(norgo) \
     DECL(tpms_elantra2012) \
     DECL(auriol_hg02832) \
-    /* Add new decoders here. */
     DECL(instapark_n1) \
+    /* Add new decoders here. */
 
 #define DECL(name) extern r_device name;
 DEVICES
