@@ -5,15 +5,22 @@ rtl_433 (despite the name) is a generic data receiver, mainly for the 433.92 MHz
 The official source code is in the https://github.com/merbanan/rtl_433/ repository.
 
 It works with [RTL-SDR](https://github.com/osmocom/rtl-sdr/) and/or [SoapySDR](https://github.com/pothosware/SoapySDR/).
-Activly tested and supported are Realtek RTL2832 based DVB dongles (using RTL-SDR) and LimeSDR ([LimeSDR USB](https://www.crowdsupply.com/lime-micro/limesdr) and [LimeSDR mini](https://www.crowdsupply.com/lime-micro/limesdr-mini) engineering samples kindly provided by [MyriadRf](https://myriadrf.org/)), PlutoSDR, HackRF One (using SoapySDR drivers), as well as SoapyRemote.
+Actively tested and supported are Realtek RTL2832 based DVB dongles (using RTL-SDR) and LimeSDR ([LimeSDR USB](https://www.crowdsupply.com/lime-micro/limesdr) and [LimeSDR mini](https://www.crowdsupply.com/lime-micro/limesdr-mini) engineering samples kindly provided by [MyriadRf](https://myriadrf.org/)), PlutoSDR, HackRF One (using SoapySDR drivers), as well as SoapyRemote.
 
-![rtl_433 screenshot](./screenshot.png)
+![rtl_433 screenshot](./docs/screenshot.png)
 
-## Building/installation
+## Building / Installation
 
-See [BUILDING.md](BUILDING.md)
+rtl_433 is written in portable C (C99 standard) and known to compile on Linux (also embedded), MacOS, and Windows systems.
+Older compilers and toolchains are supported as a key-goal.
+Low resource consumption and very few dependencies allow rtl_433 to run on embedded hardware like (repurposed) routers.
+Systems with 32-bit i686 and 64-bit x86-64 as well as (embedded) ARM, like the Raspberry Pi and PlutoSDR are well supported.
+
+See [BUILDING.md](docs/BUILDING.md)
 
 Official [binary builds for Windows](https://bintray.com/chzu/dist/rtl_433) (32 and 64 bit) are available at Bintray.
+
+On Debian (sid) or Ubuntu (19.10+), `apt-get install rtl-433` for other distros check https://repology.org/project/rtl-433/versions
 
 ## How to add support for unsupported sensors
 
@@ -24,7 +31,8 @@ Read the Test Data section at the bottom.
     rtl_433 -h
 
 ```
-Usage:		= General options =
+
+		= General options =
   [-V] Output the version string and exit
   [-v] Increase verbosity (can be used multiple times).
        -v : verbose, -vv : verbose decoders, -vvv : debug decoders, -vvvv : trace decoding).
@@ -34,19 +42,20 @@ Usage:		= General options =
   [-g <gain> | help] (default: auto)
   [-t <settings>] apply a list of keyword=value settings for SoapySDR devices
        e.g. -t "antenna=A,bandwidth=4.5M,rfnotch_ctrl=false"
-  [-f <frequency>] [-f...] Receive frequency(s) (default: 433920000 Hz)
+  [-f <frequency>] Receive frequency(s) (default: 433920000 Hz)
   [-H <seconds>] Hop interval for polling of multiple frequencies (default: 600 seconds)
   [-p <ppm_error] Correct rtl-sdr tuner frequency offset error (default: 0)
   [-s <sample rate>] Set sample rate (default: 250000 Hz)
 		= Demodulator options =
   [-R <device> | help] Enable only the specified device decoding protocol (can be used multiple times)
        Specify a negative number to disable a device decoding protocol (can be used multiple times)
-  [-G] Enable all device protocols, included those disabled by default
-  [-X <spec> | help] Add a general purpose decoder (-R 0 to disable all other decoders)
-  [-l <level>] Change detection level used to determine pulses [0-16384] (0 = auto) (default: 0)
+  [-G] Enable blacklisted device decoding protocols, for testing only.
+  [-X <spec> | help] Add a general purpose decoder (prepend -R 0 to disable all decoders)
+  [-l <level>] Change detection level used to determine pulses (0-16384) (0=auto) (default: 0)
   [-z <value>] Override short value in data decoder
   [-x <value>] Override long value in data decoder
   [-n <value>] Specify number of samples to take (each sample is 2 bytes: 1 each of I & Q)
+  [-Y auto | classic | minmax] FSK pulse detector mode.
 		= Analyze/Debug options =
   [-a] Analyze mode. Print a textual description of the signal.
   [-A] Pulse Analyzer. Enable pulse analysis and decode attempt.
@@ -59,20 +68,20 @@ Usage:		= General options =
   [-w <filename> | help] Save data stream to output file (a '-' dumps samples to stdout)
   [-W <filename> | help] Save data stream to output file, overwrite existing file
 		= Data output options =
-  [-F kv | json | csv | mqtt | syslog | null | help] Produce decoded output in given format.
+  [-F kv | json | csv | mqtt | influx | syslog | null | help] Produce decoded output in given format.
        Append output to file with :<filename> (e.g. -F csv:log.csv), defaults to stdout.
        Specify host/port for syslog with e.g. -F syslog:127.0.0.1:1514
   [-M time[:<options>] | protocol | level | stats | bits | help] Add various meta data to each output.
   [-K FILE | PATH | <tag>] Add an expanded token or fixed tag to every output line.
   [-C native | si | customary] Convert units in decoded output.
-  [-T <seconds>] Specify number of seconds to run
-  [-E] Stop after outputting successful event(s)
+  [-T <seconds>] Specify number of seconds to run, also 12:34 or 1h23m45s
+  [-E hop | quit] Hop/Quit after outputting successful event(s)
   [-h] Output this usage help and exit
        Use -d, -g, -R, -X, -F, -M, -r, -w, or -W without argument for more help
 
 
-Option -R:
-Supported device protocols:
+
+		= Supported device protocols =
     [01]  Silvercrest Remote Control
     [02]  Rubicson Temperature Sensor
     [03]  Prologue Temperature Sensor
@@ -95,7 +104,7 @@ Supported device protocols:
     [22]* X10 RF
     [23]  DSC Security Contact
     [24]* Brennenstuhl RCS 2044
-    [25]  GT-WT-02 Sensor
+    [25]  Globaltronics GT-WT-02 Sensor
     [26]  Danfoss CFR Thermostat
     [29]  Chuango Security Technology
     [30]  Generic Remote SC226x EV1527
@@ -130,7 +139,7 @@ Supported device protocols:
     [59]  Steelmate TPMS
     [60]  Schrader TPMS
     [61]* LightwaveRF
-    [62]  Elro DB286A Doorbell
+    [62]* Elro DB286A Doorbell
     [63]  Efergy Optical
     [64]* Honda Car Key
     [67]  Radiohead ASK
@@ -139,7 +148,7 @@ Supported device protocols:
     [70]  Honeywell Door/Window Sensor
     [71]  Maverick ET-732/733 BBQ Sensor
     [72]* RF-tech
-    [73]  LaCrosse TX141-Bv2/TX141TH-Bv2 sensor
+    [73]  LaCrosse TX141-Bv2, TX141TH-Bv2, TX141-Bv3 sensor
     [74]  Acurite 00275rm,00276rm Temp/Humidity with optional probe
     [75]  LaCrosse TX35DTH-IT, TFA Dostmann 30.3155 Temperature/Humidity sensor
     [76]  LaCrosse TX29IT Temperature sensor
@@ -160,8 +169,8 @@ Supported device protocols:
     [91]  inFactory
     [92]  FT-004-B Temperature Sensor
     [93]  Ford Car Key
-    [94]  Philips outdoor temperature sensor
-    [95]  Schrader TPMS EG53MA4
+    [94]  Philips outdoor temperature sensor (type AJ3650)
+    [95]  Schrader TPMS EG53MA4, PA66GF35
     [96]  Nexa
     [97]  Thermopro TP08/TP12/TP20 thermometer
     [98]  GE Color Effects
@@ -170,7 +179,7 @@ Supported device protocols:
     [101]* Dish remote 6.3
     [102]  SimpliSafe Home Security System (May require disabling automatic gain for KeyPad decodes)
     [103]  Sensible Living Mini-Plant Moisture Sensor
-    [104]* Wireless M-Bus, Mode C&T, 100kbps (-f 868950000 -s 1200000)
+    [104]  Wireless M-Bus, Mode C&T, 100kbps (-f 868950000 -s 1200000)
     [105]* Wireless M-Bus, Mode S, 32.768kbps (-f 868300000 -s 1000000)
     [106]* Wireless M-Bus, Mode R, 4.8kbps (-f 868330000)
     [107]* Wireless M-Bus, Mode F, 2.4kbps
@@ -192,28 +201,47 @@ Supported device protocols:
     [123]* Jansite TPMS Model TY02S
     [124]  LaCrosse/ELV/Conrad WS7000/WS2500 weather sensors
     [125]  TS-FT002 Wireless Ultrasonic Tank Liquid Level Meter With Temperature Sensor
+    [126]  Companion WTR001 Temperature Sensor
+    [127]  Ecowitt Wireless Outdoor Thermometer WH53/WH0280/WH0281A
+    [128]  DirecTV RC66RX Remote Control
+    [129]* Eurochron temperature and humidity sensor
+    [130]* IKEA Sparsnäs Energy Meter Monitor
+    [131]  Microchip HCS200 KeeLoq Hopping Encoder based remotes
+    [132]  TFA Dostmann 30.3196 T/H outdoor sensor
+    [133]  Rubicson 48659 Thermometer
+    [134]  Holman Industries WS5029 weather station
+    [135]  Philips outdoor temperature sensor (type AJ7010)
+    [136]  ESIC EMT7110 power meter
+    [137]  Globaltronics QUIGG GT-TMBBQ-05
+    [138]  Globaltronics GT-WT-03 Sensor
+    [139]  Norgo NGE101
+    [140]  Elantra2012 TPMS
+    [141]  Auriol HG02832 temperature/humidity sensor
 
 * Disabled by default, use -R n or -G
 
-Option -d:
+
+		= Input device selection =
 	RTL-SDR device driver is available.
-[-d <RTL-SDR USB device index>] (default: 0)
-[-d :<RTL-SDR USB device serial (can be set with rtl_eeprom -s)>]
+  [-d <RTL-SDR USB device index>] (default: 0)
+  [-d :<RTL-SDR USB device serial (can be set with rtl_eeprom -s)>]
 	To set gain for RTL-SDR use -g <gain> to set an overall gain in dB.
 	SoapySDR device driver is available.
-[-d "" Open default SoapySDR device
-[-d driver=rtlsdr Open e.g. specific SoapySDR device
+  [-d ""] Open default SoapySDR device
+  [-d driver=rtlsdr] Open e.g. specific SoapySDR device
 	To set gain for SoapySDR use -g ELEM=val,ELEM=val,... e.g. -g LNA=20,TIA=8,PGA=2 (for LimeSDR).
-[-d rtl_tcp[:[//]host[:port]] (default: localhost:1234)
+  [-d rtl_tcp[:[//]host[:port]] (default: localhost:1234)
 	Specify host/port to connect to with e.g. -d rtl_tcp:127.0.0.1:1234
 
-Option -g:
--g <gain>] (default: auto)
+
+		= Gain option =
+  [-g <gain>] (default: auto)
 	For RTL-SDR: gain in dB ("0" is auto).
 	For SoapySDR: gain in dB for automatic distribution ("" is auto), or string of gain elements.
 	E.g. "LNA=20,TIA=8,PGA=2" for LimeSDR.
 
-Option -X:
+
+		= Flex decoder spec =
 Use -X <spec> to add a flexible general purpose decoder.
 
 <spec> is "key=value[,key=value...]"
@@ -240,7 +268,8 @@ where:
 	FSK_PCM :         FSK Pulse Code Modulation
 	FSK_PWM :         FSK Pulse Width Modulation
 	FSK_MC_ZEROBIT :  Manchester Code with fixed leading zero bit
-<short>, <long>, <sync>, and <reset> are the timings for the decoder in µs
+<short>, <long>, <sync> are nominal modulation timings in us,
+<reset>, <gap>, <tolerance> are maximum modulation timings in us:
 PCM     short: Nominal width of pulse [us]
          long: Nominal width of bit period [us]
 PPM     short: Nominal width of '0' gap [us]
@@ -248,9 +277,9 @@ PPM     short: Nominal width of '0' gap [us]
 PWM     short: Nominal width of '1' pulse [us]
          long: Nominal width of '0' pulse [us]
          sync: Nominal width of sync pulse [us] (optional)
-          gap: Maximum gap size before new row of bits [us]
-    tolerance: Maximum pulse deviation [us] (optional)
-        reset: Maximum gap size before End Of Message [us].
+common    gap: Maximum gap size before new row of bits [us]
+        reset: Maximum gap size before End Of Message [us]
+    tolerance: Maximum pulse deviation [us] (optional).
 Available options are:
 	bits=<n> : only match if at least one row has <n> bits
 	rows=<n> : only match if there are <n> rows
@@ -261,28 +290,35 @@ Available options are:
 	match=<bits> : only match if the <bits> are found
 	preamble=<bits> : match and align at the <bits> preamble
 		<bits> is a row spec of {<bit count>}<bits as hex number>
+	unique : suppress duplicate row output
+
 	countonly : suppress detailed row output
 
 E.g. -X "n=doorbell,m=OOK_PWM,s=400,l=800,r=7000,g=1000,match={24}0xa9878c,repeats>=3"
 
 
-Option -F:
-[-F kv|json|csv|mqtt|syslog|null] Produce decoded output in given format.
+
+		= Output format option =
+  [-F kv|json|csv|mqtt|influx|syslog|null] Produce decoded output in given format.
 	Without this option the default is KV output. Use "-F null" to remove the default.
 	Append output to file with :<filename> (e.g. -F csv:log.csv), defaults to stdout.
 	Specify MQTT server with e.g. -F mqtt://localhost:1883
 	Add MQTT options with e.g. -F "mqtt://host:1883,opt=arg"
-	MQTT options are: user=foo, pass=bar, retain[=0|1],
-		 usechannel=replaceid|afterid|beforeid|no, <format>[=topic]
+	MQTT options are: user=foo, pass=bar, retain[=0|1], <format>[=topic]
 	Supported MQTT formats: (default is all)
 	  events: posts JSON event data
 	  states: posts JSON state data
 	  devices: posts device and sensor info in nested topics
-	E.g. -F "mqtt://localhost:1883,user=USERNAME,pass=PASSWORD,retain=0,devices=/rtl_433"
+	The topic string will expand keys like [/model]
+	E.g. -F "mqtt://localhost:1883,user=USERNAME,pass=PASSWORD,retain=0,devices=rtl_433[/id]"
+	Specify InfluxDB 2.0 server with e.g. -F "influx://localhost:9999/api/v2/write?org=<org>&bucket=<bucket>,token=<authtoken>"
+	Specify InfluxDB 1.x server with e.g. -F "influx://localhost:8086/write?db=<db>&p=<password>&u=<user>"
+	  Additional parameter -M time:unix:usec:utc for correct timestamps in InfluxDB recommended
 	Specify host/port for syslog with e.g. -F syslog:127.0.0.1:1514
 
-Option -M:
-[-M time[:<options>]|protocol|level|stats|bits|newmodel] Add various metadata to every output line.
+
+		= Meta information option =
+  [-M time[:<options>]|protocol|level|stats|bits|newmodel] Add various metadata to every output line.
 	Use "time" to add current date and time meta data (preset for live inputs).
 	Use "time:rel" to add sample position meta data (preset for read-file and stdin).
 	Use "time:unix" to show the seconds since unix epoch as time meta data.
@@ -298,8 +334,13 @@ Option -M:
 	  level 0: no report, 1: report successful devices, 2: report active devices, 3: report all
 	Use "bits" to add bit representation to code outputs (for debug).
 
-Option -r:
-[-r <filename>] Read data from input file instead of a receiver
+Note:	Use "newmodel" to transition to new model keys. This will become the default someday.
+	A table of changes and discussion is at https://github.com/merbanan/rtl_433/pull/986.
+
+
+
+		= Read file option =
+  [-r <filename>] Read data from input file instead of a receiver
 	Parameters are detected from the full path, file name, and extension.
 
 	A center frequency is detected as (fractional) number suffixed with 'M',
@@ -317,9 +358,10 @@ Option -r:
 	E.g. default detection by extension: path/filename.am.s16
 	forced overrides: am:s16:path/filename.ext
 
-Option -w:
-[-w <filename>] Save data stream to output file (a '-' dumps samples to stdout)
-[-W <filename>] Save data stream to output file, overwrite existing file
+
+		= Write file option =
+  [-w <filename>] Save data stream to output file (a '-' dumps samples to stdout)
+  [-W <filename>] Save data stream to output file, overwrite existing file
 	Parameters are detected from the full path, file name, and extension.
 
 	File content and format are detected as parameters, possible options are:
